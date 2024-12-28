@@ -2,9 +2,8 @@ pipeline {
     agent any
     
     environment {
-        AWS_CREDENTIALS = credentials('aws-credentials')
         TF_PATH = "${WORKSPACE}/terraform"
-        TERRAFORM_VERSION = '1.5.7'  // Specify your Terraform version
+        TERRAFORM_VERSION = '1.5.7'
     }
     
     parameters {
@@ -22,7 +21,6 @@ pipeline {
         stage('Setup Terraform') {
             steps {
                 script {
-                    // Install specific version of Terraform if not already installed
                     def tfHome = tool name: 'Terraform', type: 'terraform'
                     env.PATH = "${tfHome}:${env.PATH}"
                 }
@@ -33,16 +31,22 @@ pipeline {
             steps {
                 dir(TF_PATH) {
                     script {
-                        // Initialize with backend config
-                        sh """
-                            terraform init \
-                            -backend-config="bucket=company-terraform-states" \
-                            -backend-config="key=${params.ENVIRONMENT}/infrastructure.tfstate" \
-                            -backend-config="region=us-west-2" \
-                            -backend-config="encrypt=true"
-                            
-                            terraform workspace select ${params.ENVIRONMENT} || terraform workspace new ${params.ENVIRONMENT}
-                        """
+                        withCredentials([[
+                            $class: 'AmazonWebServicesCredentialsBinding',
+                            credentialsId: 'aws-credentials',
+                            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                        ]]) {
+                            sh """
+                                terraform init \
+                                -backend-config="bucket=company-terraform-states" \
+                                -backend-config="key=${params.ENVIRONMENT}/infrastructure.tfstate" \
+                                -backend-config="region=us-west-2" \
+                                -backend-config="encrypt=true"
+                                
+                                terraform workspace select ${params.ENVIRONMENT} || terraform workspace new ${params.ENVIRONMENT}
+                            """
+                        }
                     }
                 }
             }
@@ -59,7 +63,14 @@ pipeline {
         stage('Terraform Validate') {
             steps {
                 dir(TF_PATH) {
-                    sh 'terraform validate'
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'aws-credentials',
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh 'terraform validate'
+                    }
                 }
             }
         }
@@ -68,11 +79,18 @@ pipeline {
             steps {
                 dir(TF_PATH) {
                     script {
-                        sh """
-                            terraform plan \
-                            -var-file="environments/${params.ENVIRONMENT}.tfvars" \
-                            -out=tfplan
-                        """
+                        withCredentials([[
+                            $class: 'AmazonWebServicesCredentialsBinding',
+                            credentialsId: 'aws-credentials',
+                            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                        ]]) {
+                            sh """
+                                terraform plan \
+                                -var-file="environments/${params.ENVIRONMENT}.tfvars" \
+                                -out=tfplan
+                            """
+                        }
                     }
                 }
             }
@@ -95,7 +113,14 @@ pipeline {
             }
             steps {
                 dir(TF_PATH) {
-                    sh 'terraform apply -auto-approve tfplan'
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'aws-credentials',
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh 'terraform apply -auto-approve tfplan'
+                    }
                 }
             }
         }
@@ -110,11 +135,18 @@ pipeline {
                         if (params.ENVIRONMENT == 'prod') {
                             input message: 'Are you sure you want to destroy production infrastructure?'
                         }
-                        sh """
-                            terraform destroy \
-                            -var-file="environments/${params.ENVIRONMENT}.tfvars" \
-                            -auto-approve
-                        """
+                        withCredentials([[
+                            $class: 'AmazonWebServicesCredentialsBinding',
+                            credentialsId: 'aws-credentials',
+                            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                        ]]) {
+                            sh """
+                                terraform destroy \
+                                -var-file="environments/${params.ENVIRONMENT}.tfvars" \
+                                -auto-approve
+                            """
+                        }
                     }
                 }
             }
@@ -127,18 +159,25 @@ pipeline {
             steps {
                 dir(TF_PATH) {
                     script {
-                        def outputs = sh(
-                            script: 'terraform output -json',
-                            returnStdout: true
-                        ).trim()
-                        
-                        echo "Terraform Outputs: ${outputs}"
-                        
-                        // Parse JSON outputs if needed
-                        def outputsMap = readJSON text: outputs
-                        
-                        // Access specific output
-                        echo "Instance ID: ${outputsMap.instance_id.value}"
+                        withCredentials([[
+                            $class: 'AmazonWebServicesCredentialsBinding',
+                            credentialsId: 'aws-credentials',
+                            accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                            secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                        ]]) {
+                            def outputs = sh(
+                                script: 'terraform output -json',
+                                returnStdout: true
+                            ).trim()
+                            
+                            echo "Terraform Outputs: ${outputs}"
+                            
+                            // Parse JSON outputs if needed
+                            def outputsMap = readJSON text: outputs
+                            
+                            // Access specific output
+                            echo "Instance ID: ${outputsMap.instance_id.value}"
+                        }
                     }
                 }
             }
@@ -154,6 +193,7 @@ pipeline {
         }
         failure {
             echo 'Pipeline execution failed!'
+            // You can add notification steps here
         }
     }
 }
