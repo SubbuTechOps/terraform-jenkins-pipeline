@@ -119,6 +119,30 @@ pipeline {
                 }
             }
         }
+
+        stage('Show Outputs') {
+            when {
+                expression { params.ACTION == 'apply' }
+            }
+            steps {
+                dir(TF_PATH) {
+                    script {
+                        def outputs = sh(
+                            script: 'terraform output -json',
+                            returnStdout: true
+                        ).trim()
+                        
+                        echo "Terraform Outputs: ${outputs}"
+                        
+                        // Parse JSON outputs if needed
+                        def outputsMap = readJSON text: outputs
+                        
+                        // Access specific output
+                        echo "Instance ID: ${outputsMap.instance_id.value}"
+                    }
+                }
+            }
+        }
     }
 
     post {
